@@ -75,6 +75,8 @@ jobs:
       - run: npm run format:check
       - run: npm run build
       - run: npm run typecheck
+      - name: Release contracts
+        run: npm run check:release
       # Generated-artifact governance. astryx-theme/maka.{css,js} are built
       # from makaTheme.ts, which is now the renderer's type-scale authority —
       # editing the scale without regenerating would leave the authority and
