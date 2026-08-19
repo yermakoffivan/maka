@@ -1264,8 +1264,6 @@ function AppShellContent({
           sessionId: activeId,
           name: shellCopy.newConversation,
           permissionMode: defaultPermissionMode,
-          newChatModel,
-          defaultConnectionSlug: defaultConnection,
         })
       : undefined);
   const {
