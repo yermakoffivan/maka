@@ -3,10 +3,8 @@
  * this session succeed, silently rebind, or fail?". #1038.
  *
  * This is the single decision source shared by:
- *   - the main-process send gate (`ensureSessionCanSendOrRebind` in
- *     apps/desktop/src/main/chat-readiness.ts), which resolves the async
- *     facts (connections, secrets), calls this projection, then performs
- *     the actual rebind mutation / throws the canonical error copy;
+ *   - the desktop onboarding service, which resolves the async facts
+ *     (connections, secrets) and calls this projection;
  *   - the renderer session health notice above the composer, which maps
  *     a `blocked` outcome to actionable copy.
  *
@@ -34,9 +32,9 @@ import type { LlmConnection } from './llm-connections.js';
 
 export interface SessionSendProjectionSession {
   /**
-   * Session backend kind. `string` (not `BackendKind`) so legacy on-disk
-   * values like `'claude'` are surfaced exactly as the JSONL stored them;
-   * only `'fake'` is special-cased, everything else goes through the
+   * Session backend kind. `string` (not `PersistedBackendKind`) so legacy
+   * on-disk values like `'claude'` are surfaced exactly as the JSONL stored
+   * them; only `'fake'` is special-cased, everything else goes through the
    * normal connection readiness gate.
    */
   backend: string;
@@ -83,7 +81,7 @@ export function projectSessionSendOutcome(
   }
 
   for (const slug of new Set([defaultSlug, ...connections.map((connection) => connection.slug)])) {
-    if (!slug || slug === 'fake') continue;
+    if (!slug) continue;
     const connection = connections.find((entry) => entry.slug === slug);
     if (!connection) continue;
     const normalized = normalizeOpenAiCodexConnection(connection);
@@ -100,24 +98,26 @@ export function projectSessionSendOutcome(
 
 /**
  * Why the session's own connection cannot send, or `undefined` when it
- * can. Mirrors `assertSessionCanSend` + `requireReadyConnection` in the
- * desktop main process — keep the reason order in sync with the throwing
- * path so both surfaces report identical causes.
+ * can. Keep the reason order in sync with the activation path so both
+ * surfaces report identical causes.
  *
- * Exported for the send gate's staged fact resolution (#1038 review):
- * main resolves only the session's OWN connection in phase 1 and calls
- * this directly, so a healthy session never waits on — nor is failed
- * by — unrelated connections. The full projection reuses the same
- * helper, keeping one implementation of the own-connection judgment.
+ * Exported for staged fact resolution (#1038 review): a caller may resolve
+ * only the session's OWN connection first and call this directly, so a
+ * healthy session never waits on — nor is failed by — unrelated
+ * connections. The full projection reuses the same helper, keeping one
+ * implementation of the own-connection judgment.
  */
 export function sessionOwnConnectionBlockReason(
   session: SessionSendProjectionSession,
   ownConnection: LlmConnection | null,
   hasSecret: (slug: string) => boolean,
 ): ChatConfigurationReason | undefined {
+  // Sessions written by builds that shipped FakeBackend keep `'fake'` on disk
+  // forever (#3211). They are refused here — and at activation — rather than
+  // rewritten, because their `llmConnectionSlug` still points at nothing.
   if (session.backend === 'fake') return 'fake_backend';
   const slug = session.llmConnectionSlug;
-  if (!slug || slug === 'fake') return 'missing_default_connection';
+  if (!slug) return 'missing_default_connection';
   if (!ownConnection) return 'connection_missing';
   const normalized = normalizeOpenAiCodexConnection(ownConnection);
   const verdict = isConnectionReady({
@@ -133,10 +133,7 @@ function ownConnectionBlockReason(
   connections: readonly LlmConnection[],
   hasSecret: (slug: string) => boolean,
 ): ChatConfigurationReason | undefined {
-  const own =
-    session.backend === 'fake'
-      ? null
-      : (connections.find((entry) => entry.slug === session.llmConnectionSlug) ?? null);
+  const own = connections.find((entry) => entry.slug === session.llmConnectionSlug) ?? null;
   return sessionOwnConnectionBlockReason(session, own, hasSecret);
 }
 
